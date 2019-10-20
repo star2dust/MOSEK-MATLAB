@@ -1,0 +1,431 @@
+ca#!/bin/bash
+
+BDIR=$(cd $(dirname $0)/.. && pwd)
+
+#configuration
+declare -A CONFIG
+CONFIG[PORT]=30080
+CONFIG[INSTMETHOD]=global
+CONFIG[PREFIX]=""
+CONFIG[UPDATE]=""
+CONFIG[CERTFILE]=""
+CONFIG[KEYFILE]=""
+CONFIG[CMD]=$(basename $0)
+CONFIG[MODE]="simple"
+CONFIG[GETTASK]="false"
+CONFIG[ANONSUBMIT]="false"
+CONFIG[MOSEKDIST]=""
+CONFIG[MOSEKBINDIR]=""
+CONFIG[DB]="sqlite3"
+CONFIG[DBRES]=""
+
+SETLOC=""
+
+CMD=$0
+
+
+function usage() {
+    echo "Syntax: $CMD OPTIONS"
+    echo "OPTIONS:"
+    echo "  --mosekdir     Defines the location of the MOSEK installation"
+    echo "  --mosekbindir  Defines the the MOSEK binaries"
+
+    echo "  --inplace      Set up the server to run directly in the unpacked distro directory"
+    echo "  --user         Install in ~/.local"
+    echo "  --global       Install in /usr"
+    echo "  --prefix DIR   Install in DIR"
+
+    echo "  --database (sqlite3|postgres) Choose which database to use"
+    echo "  --database-resource STR  Choose the database connection. For sqlite3 this is just a filename, for"
+    echo "                           postgreSQL this is the connection string."
+
+    echo "  --mode (simple|api|gui)  Enable only the simple API, enable users and user API, or enable user API and GUI"
+    echo "  --ssl DIR                This directory contains valid cert.pem and key.pem for HTTPS. DIR='', HTTPS is disabled"
+    echo "  --server-key FILE        The server key file"
+    echo "  --server-cert FILE       The server certificate file"
+    echo "  --enable-get             Enable fetching submitted data/problem files"
+    echo "  --enable-anonymous       Enable submitting without credentials"
+}
+
+while (($# > 0)); do
+    case "$1" in
+        "--inplace")
+            if [ -n "$SETLOC" ]; then
+                echo "Fail: Only one if --inplace, --user, --global and --prefix can be used"
+                exit 1
+            fi
+            CONFIG[INSTMETHOD]="inplace"
+            CONFIG[PREFIX]="$BDIR"
+            BINDIR="${CONFIG[PREFIX]}/bin"
+            VARDIR="${CONFIG[PREFIX]}/var"
+            ETCDIR="${CONFIG[PREFIX]}/etc"
+            SETLOC="YES"
+            shift
+            ;;
+        "--user")
+            if [ -n "$SETLOC" ]; then
+                echo "Fail: Only one if --inplace, --user, --global and --prefix can be used"
+                exit 1
+            fi
+            CONFIG[INSTMETHOD]="user"
+            CONFIG[PREFIX]=$HOME/.local
+            BINDIR="${CONFIG[PREFIX]}/bin"
+            VARDIR="${CONFIG[PREFIX]}/var"
+            ETCDIR="${CONFIG[PREFIX]}/etc"
+            SETLOC="YES"
+            shift
+            ;;
+        "--global")
+            if [ -n "$SETLOC" ]; then
+                echo "Fail: Only one if --inplace, --user, --global and --prefix can be used"
+                exit 1
+            fi
+            CONFIG[INSTMETHOD]="global"
+            CONFIG[PREFIX]="/usr"
+            BINDIR="${CONFIG[PREFIX]}/bin"
+            VARDIR="/var"
+            ETCDIR="/etc"
+            SETLOC="YES"
+            shift
+            ;;
+        "--prefix")
+            if [ -n "$SETLOC" ]; then
+                echo "Fail: Only one if --inplace, --user, --global and --prefix can be used"
+                exit 1
+            fi
+            CONFIG[INSTMETHOD]="prefix"
+            mkdir -p "$2"
+            pushd "$2"
+            CONFIG[PREFIX]=$(pwd)
+            popd
+            BINDIR="${CONFIG[PREFIX]}/bin"
+            VARDIR="${CONFIG[PREFIX]}/var"
+            ETCDIR="${CONFIG[PREFIX]}/etc"
+            SETLOC="YES"
+            shift 2
+            ;;
+        "--update")
+            CONFIG[UPDATE]="yes"
+            ;;
+        "--no-ssl")
+            CONFIG[CERTFILE]=""
+            CONFIG[KEYFILE]=""
+            shift
+            ;;
+        "--ssl")
+            if [ "$2" == "" ]; then
+                echo "Error: Invalid SSL dir $2"
+                exit 1
+            elif [ -d "$2" ]; then
+                SSLDIR=$(cd "$2"; pwd)
+                CONFIG[CERTFILE]=$SSLDIR/cert.pem
+                CONFIG[KEYFILE]=$SSLDIR/key.pem
+            else
+                echo "Error: Invalid SSL dir $2"
+                exit 1
+            fi
+            shift 2
+            ;;
+        "--server-key")
+            if [ "$2" == "" ]; then
+                echo "Error: Invalid Server key $2"
+                exit 1
+            elif [ -d $(dirname "$2") ]; then
+                CONFIG[KEYFILE]=$( cd $(dirname "$2") && echo $(pwd)/$(basename "$2"))
+            else
+                echo "Error: Invalid Server key $2"
+                exit 1
+            fi
+            shift 2
+            ;;
+        "--server-cert")
+            if [ "$2" == "" ]; then
+                echo "Error: Invalid Server certificate $2"
+                exit 1
+            elif [ -d $(dirname "$2") ]; then
+                CONFIG[CERTFILE]=$( cd $(dirname "$2") && echo $(pwd)/$(basename "$2"))
+            else
+                echo "Error: Invalid Server key $2"
+                exit 1
+            fi
+            shift 2
+            ;;
+        "--mosekdir")
+            if [ "$2" == "" ]; then
+                CONFIG[MOSEKDIR]=""
+            else                
+                mkdir -p "$2"
+                (cd "$2";
+                 CONFIG[MOSEKDIR]=$(pwd) )
+            fi
+            shift 2
+            ;;
+        "--mosekbindir")
+            if [ "$2" == "" ]; then
+                CONFIG[MOSEKBINDIR]=""
+            else                
+                mkdir -p "$2"
+                CONFIG[MOSEKBINDIR]=$(cd $2 && pwd)
+            fi
+            shift 2
+            ;;
+        "--port")
+            CONFIG[PORT]=$2
+            shift 2
+            ;;
+        "--database")
+            case "$2" in
+                "sqlite3") CONFIG[DB]="sqlite3" ;;
+                "postgres") CONFIG[DB]="postgres" ;;
+                "*")
+                    echo "Error: Invalid database $2"
+                    exit 1
+                    ;;
+            esac    
+            shift 2
+            ;;
+        "--database-resource")
+            CONFIG[DBRES]="$2" 
+            shift 2
+            ;;
+        "--mode")
+            case "$2" in
+                "simple") CONFIG[MODE]="simple" ;;
+                "api")    CONFIG[MODE]="api" ;;
+                "gui")    CONFIG[MODE]="gui" ;;
+                "*")
+                    echo "Error: Invalid mode $2"
+                    ;;
+            esac
+            shift 2
+            ;;
+        "--enable-anonymous")
+            CONFIG[ANONSUBMIT]="true"
+            shift
+            ;;
+        "--enable-get")
+            CONFIG[GETTASK]="true"
+            shift
+            ;;
+        "--help"|"-h")
+            usage
+            exit 1
+            ;;
+        "-*")
+            echo "Invalid flag: $1"
+            exit 1
+            ;;
+        *)
+            echo "Invalid argument: $1"
+            exit 1
+            ;;
+    esac
+done
+
+#echo "CERT key ${CONFIG[KEYFILE]}"
+#echo "CERT file ${CONFIG[CERTFILE]}"
+
+if [ "${CONFIG[PREFIX]}" == "" ]; then
+    usage
+    exit 1
+fi
+
+if [ -z "${CONFIG[MOSEKBINDIR]}" ]; then
+    if [ -z "${CONFIG[MOSEKDIR]}" ]; then
+        CONFIG[MOSEKDIR]=$HOME/mosek
+    fi
+
+    if [ -d "${CONFIG[MOSEKDIR]}" ]; then
+        VER=$(ls "${CONFIG[MOSEKDIR]}" | grep '^[0-9]\+\(\.[0-9]+\)\?\>' | sort -n | tail -n 1)
+        if [ -z "$VER" ]; then
+            echo "Failed to locate a suitable MOSEK version in ${CONFIG[MOSEKDIR]}" && exit 1
+        else
+            CONFIG[MOSEKBINDIR]="${CONFIG[MOSEKDIR]}/$VER/tools/platform/linux64x86/bin"
+        fi
+    else
+        echo "${CONFIG[MOSEKDIR]} is not a directory" && exit 1
+    fi
+fi
+
+function abspath() { cd $1 ; pwd; }
+
+if [ "${CONFIG[DBRES]}" == "" ]; then
+    if [ "${CONFIG[DB]}" == "sqlite3" ]; then
+        CONFIG[DBRES]='$BaseDir/server.db'
+    elif [ "${CONFIG[DB]}" == "postgres" ]; then
+        CONFIG[DBRES]="user=$USER dbname=$USER sslmode=disable"
+    fi
+fi
+
+if [ -d "${CONFIG[MOSEKBINDIR]}" ]; then
+    MOSEKBINDIR=$(abspath "${CONFIG[MOSEKBINDIR]}")
+
+    if [ -e "$MOSEKBINDIR/mosekcli" ]; then
+        SOLVECMD="$MOSEKBINDIR/mosekcli -pid-file \$workdir/PID -log \$workdir/solver.log -read \$taskfile -solve:res=\$workdir/result.res,trm=\$workdir/result.trm,msg=\$workdir.msg -write-solution:json \$workdir/solution.jtask -write-solution:task \$workdir/solution.task -write-solution:plain \$workdir/solution.ascii -indicator-file:done \$workdir/done"
+    fi
+else
+    echo "${CONFIG[MOSEKBINDIR]} is not a directory" && exit 1
+fi
+
+CONFIGFILE="$ETCDIR/Mosek/server.conf"
+
+if [ "${CONFIG[INSTMETHOD]}" != "inplace" ]; then
+    echo "Make directories..."                        && \
+    mkdir -p "$BINDIR"                                && \
+    mkdir -p "$ETCDIR/Mosek/ssl"                      && \
+    mkdir -p "$VARDIR/Mosek/HTML/web/script"          && \
+    mkdir -p "$VARDIR/Mosek/HTML/web/style"           && \
+    mkdir -p "$VARDIR/Mosek/HTML/web/image"           && \
+    mkdir -p "$VARDIR/Mosek/HTML/content"             && \
+    mkdir -p "$VARDIR/Mosek/HTML/template"            && \
+    mkdir -p "$VARDIR/Mosek/HTML/default"             && \
+    mkdir -p "$VARDIR/Mosek/jobs/tasks"               && \
+    \
+    echo "Install into ${CONFIG[PREFIX]}" && \
+    cp "$BDIR/bin/MosekServer.bin" "$BINDIR/" &&   \
+    \
+    echo "  Javascript... " && \
+    cp  "$BDIR/var/Mosek/HTML/web/script/baseapi.js"    \
+        "$BDIR/var/Mosek/HTML/web/script/api.js"    \
+        "$BDIR/var/Mosek/HTML/web/script/gui.js"    \
+        "$BDIR/var/Mosek/HTML/web/script/jobs.js"   \
+        "$BDIR/var/Mosek/HTML/web/script/tokens.js" \
+        "$BDIR/var/Mosek/HTML/web/script/users.js"  \
+        "$BDIR/var/Mosek/HTML/web/script/login.js"  \
+        "$VARDIR/Mosek/HTML/web/script" && \
+    \
+    echo "  Stylesheets... " && \
+    cp  "$BDIR/var/Mosek/HTML/web/style/style.css" \
+        "$BDIR/var/Mosek/HTML/web/style/stub.css" \
+        "$BDIR/var/Mosek/HTML/web/style/jobs.css" \
+        "$VARDIR/Mosek/HTML/web/style" && \
+    \
+    echo "  Graphics... " && \
+    cp  "$BDIR/var/Mosek/HTML/web/image/favicon.png" \
+        "$BDIR/var/Mosek/HTML/web/image/mosekserver.png" \
+        "$BDIR/var/Mosek/HTML/web/image/webgraphmoseklogocolor.png" \
+        "$VARDIR/Mosek/HTML/web/image" && \
+        \
+    echo "  Web content... " && \
+    cp  "$BDIR/var/Mosek/HTML/web/login.html" \
+        "$VARDIR/Mosek/HTML/web" && \
+    \
+    cp  "$BDIR/var/Mosek/HTML/content/mytokens.html"  \
+        "$BDIR/var/Mosek/HTML/content/myjobs.html"    \
+        "$BDIR/var/Mosek/HTML/content/alltokens.html" \
+        "$BDIR/var/Mosek/HTML/content/alljobs.html"   \
+        "$BDIR/var/Mosek/HTML/content/index.html"     \
+        "$BDIR/var/Mosek/HTML/content/profile.html"   \
+        "$BDIR/var/Mosek/HTML/content/userlist.html"  \
+        \
+        "$VARDIR/Mosek/HTML/content" && \
+    \
+    cp  "$BDIR/var/Mosek/HTML/template/default.html"  \
+        \
+        "$VARDIR/Mosek/HTML/template" && \
+    \
+    cp  "$BDIR/var/Mosek/HTML/default/favicon.png" \
+        "$BDIR/var/Mosek/HTML/default/webgraphmoseklogocolor.png" \
+        "$BDIR/var/Mosek/HTML/default/index.html" \
+        "$BDIR/var/Mosek/HTML/default/script.js" \
+        "$BDIR/var/Mosek/HTML/default/baseapi.js" \
+        "$VARDIR/Mosek/HTML/default" && \
+    \
+    if [ "${CONFIG[CERTFILE]}" != "" ]; then
+        mkdir -p "$ETCDIR/Mosek/ssl" && \
+        rm -f "$ETCDIR/Mosek/ssl/cert.pem" && \
+        ln -s "${CONFIG[CERTFILE]}" "$ETCDIR/Mosek/ssl/cert.pem" && \
+        chmod go-rw "$ETCDIR/Mosek/ssl/cert.pem"
+    fi && \
+    if [ "${CONFIG[KEYFILE]}" != "" ]; then
+        mkdir -p "$ETCDIR/Mosek/ssl" && \
+        rm -f "$ETCDIR/Mosek/ssl/key.pem" && \
+        ln -s "${CONFIG[KEYFILE]}"  "$ETCDIR/Mosek/ssl/key.pem" && \
+        chmod go-rw "$ETCDIR/Mosek/ssl/key.pem"
+    fi && \
+    echo "Creating server config file" && \
+    echo "#!/bin/bash" > "$BINDIR/MosekServer" && \
+    echo "exec \"$BINDIR/MosekServer.bin\" -config=\"$CONFIGFILE\" \"\$@\"" >> "$BINDIR/MosekServer" && \
+    chmod +x "$BINDIR/MosekServer"
+else # inplace
+    chmod go-rw "$ETCDIR/Mosek/ssl/cert.pem" "$ETCDIR/Mosek/ssl/key.pem" && \
+    mkdir -p "$VARDIR/Mosek/jobs/tasks"
+    echo "#!/bin/bash" > "$BINDIR/MosekServer" && \
+    echo "exec \"$BINDIR/MosekServer.bin\" -config=\"$CONFIGFILE\" \"\$@\"" >> "$BINDIR/MosekServer" && \
+    chmod +x "$BINDIR/MosekServer"
+fi && \
+\
+echo "Creating server configuration ($CONFIGFILE)"  && \
+if [[ ! -f "$CONFIGFILE" ]]; then
+    ( echo "[network]"
+      echo 'Host          = '
+      echo "Port          = ${CONFIG[PORT]}"
+      echo ""
+      echo "[paths]"
+      echo "BaseDir       = $VARDIR/Mosek"
+      echo "JobsDir       = \$BaseDir/jobs"
+      echo "StaticHTMLDir = \$BaseDir/HTML/web"
+      echo "HTMLContentDir = \$BaseDir/HTML/content"
+      echo "HTMLTemplate  = \$BaseDir/HTML/template/default.html"
+      echo "CertDir       = $ETCDIR/Mosek/ssl"
+      echo "Database      = ${CONFIG[DB]}:${CONFIG[DBRES]}"
+      echo "LogFile       = \$BaseDir/server.log"
+      echo "PidFile       = \$BaseDir/server.pid"
+      echo "MosekBinDir   = ${CONFIG[MOSEKBINDIR]}"
+      echo ""
+      echo "[jobs]"
+      echo "SolveCmd      = \${PATHS.MosekBinDir}/mosekcli \\"
+      echo "                -pid-file \$\$workdir/PID \\"
+      echo "                -log \$\$workdir/solver.log \\"
+      echo "                -read \$\$taskfile \\"
+      echo "                -solve:res=\$\$workdir/result.res,trm=\$\$workdir/result.trm,msg=\$\$workdir/result.msg \\"
+      echo "                -write-solution:json  \$\$workdir/solution.jtask \\"
+      echo "                -write-solution:task  \$\$workdir/solution.task \\"
+      echo "                -write-solution:plain \$\$workdir/solution.ascii"
+      echo "KeepJobs      = 1000"
+      echo "MaxFileSize   = 5 Mb"
+      echo "Expiry        = 2 days"
+      echo "Timeout       = 1 minute"
+      echo ""
+      echo "[access]"
+      if   [ "${CONFIG[MODE]}" == "simple" ]; then
+          echo "EnableAnonymousSubmit = yes"
+      else
+          echo "EnableAnonymousSubmit = ${CONFIG[ANONSUBMIT]}"
+      fi
+
+      if   [ "${CONFIG[MODE]}" == "simple" ]; then
+          echo "EnableUserAPI         = no"
+          echo "EnableUserGUI         = no"
+      elif [ "${CONFIG[MODE]}" == "api" ]; then
+          echo "EnableUserAPI         = yes"
+          echo "EnableUserGUI         = no"
+      elif [ "${CONFIG[MODE]}" == "gui" ]; then
+          echo "EnableUserAPI         = yes"
+          echo "EnableUserGUI         = yes"
+      fi
+      echo "EnableGetProblem      = ${CONFIG[GETTASK]}"
+      echo "AccessTokenMaxExpiry  = 3 months" ) > $CONFIGFILE 
+    fi && \
+\
+echo "Configuration file : $CONFIGFILE" && \
+echo "Listen to port:      ${CONFIG[PORT]}" && \
+echo "Server work dir:     $VARDIR/Mosek" && \
+echo "Database:            ${CONFIG[DB]}:${CONFIG[DBRES]}" && \
+if   [ "${CONFIG[MODE]}" == "simple" ]; then
+    echo "API Mode:            simple"
+elif [ "${CONFIG[MODE]}" == "api" ]; then
+    echo "API Mode:            API enabled"
+elif [ "${CONFIG[MODE]}" == "gui" ]; then
+    echo "API Mode:            API+GUI enabled"
+fi && \
+if   [ "${CONFIG[CERTFILE]}" != "" ]; then
+    echo "Serve mode:          HTTPS"
+else
+    echo "Serve mode:          HTTP"
+fi
+echo && \
+echo "You can now start the server as:" &&\
+echo "$BINDIR/MosekServer" \
+|| \
+echo "Installation failed!"

@@ -1,0 +1,31 @@
+<header>
+  <h1>Update preferences</h1>
+</header>
+<section id="content" class="wrapper">
+  <section class="user-op-div">
+    <form id="user-form" action="javascript:profile_submitUserChanges()">
+      <table>
+        <tbody>
+          <tr><td colspan="1">User ID:             </td> <td><input type="text" id="field-user-id" disabled>   </td></tr>
+          <tr><td colspan="1">Name:                </td> <td><input type="text" id="field-user-name">      </td></tr>
+          <tr><td colspan="1">Email:               </td> <td><input type="text" id="field-user-email"></td></tr>
+          <tr><td colspan="1">Current Password:    </td> <td><input type="password" id="field-user-password" placeholder="Current password">        </td></tr>
+          <tr><td colspan="1">New Password:        </td> <td><input type="password" id="field-user-new-pwd1" placeholder="New password">                </td></tr>
+          <tr><td colspan="1">New Password (again):</td> <td><input id="field-user-new-pwd2" type="password" placeholder="Repeat new password"> </td></tr>
+          <tr><td colspan="2">Permissions          </td></tr>                
+          <tr><td></td><td><input id="field-user-submitter"   type="checkbox"><label for="field-user-submitter">Submitter</label></td></tr>
+          <tr><td></td><td><input id="field-user-accesstoken" type="checkbox"><label for="field-user-submitter">Token user</label></td></tr>
+	  <tr><td></td><td><input id="field-user-admin"       type="checkbox" disabled><label for="field-user-submitter">Admin</label></td></tr>
+          <tr>
+            <td colspan="3">
+              <input type="submit" value="Update">
+              <input type="button" value="Reset" onClick="resetContents()">
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </form>
+    <div id="error-msg"> </div>
+    <div id="status-msg"> </div>
+  </section>
+</section>

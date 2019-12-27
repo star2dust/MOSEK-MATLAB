@@ -1,8 +1,9 @@
 # MOSEK-MATLAB
 ## Introduction
 
-- A COPY OF: MOSEK Optimization Toolbox for MATLAB. https://docs.mosek.com/9.0/toolbox/install-interface.html
-- Personal academic license for mosek are free. https://www.mosek.com/products/academic-licenses/
+- MOSEK Optimization Toolbox for MATLAB. https://docs.mosek.com/9.0/toolbox/install-interface.html
+- Personal academic license for MOSEK are free. https://www.mosek.com/products/academic-licenses/
+- MOSEK packages downloading. https://download.mosek.com/stable/wheel/index.html
 
 ## Installation
 
